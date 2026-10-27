@@ -1,7 +1,5 @@
+import { WorkspaceApplication } from "@/components/workspace/workspace-app";
+
 export default function Page() {
-  return (
-    <main>
-      <h1>Jev2Chat</h1>
-    </main>
-  );
+  return <WorkspaceApplication />;
 }
