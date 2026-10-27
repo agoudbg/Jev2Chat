@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Credentials, GenerationParams, ModelSettings } from "./domain";
-import { fetchJson } from "./http";
+import { fetchJson, redactJson } from "./http";
 import { parseChoice, serializeChoice } from "./jev-protocol";
 import { credentialsSchema } from "./model-settings";
 import {
@@ -89,7 +89,14 @@ export class JevProvider implements ChoiceProvider {
       signal,
       [this.credentials.token, ...Object.values(this.credentials.extraHeaders)],
     );
-    return parseChoice(raw, request);
+    const result = parseChoice(raw, request);
+    return {
+      ...result,
+      response: redactJson(result.response, [
+        this.credentials.token,
+        ...Object.values(this.credentials.extraHeaders),
+      ]),
+    };
   }
 }
 

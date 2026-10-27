@@ -1,4 +1,5 @@
 import { ChoiceError } from "./provider";
+import type { JsonValue } from "./domain";
 
 export async function readJsonLimited(response: Response, limit = 1_048_576): Promise<unknown> {
   if (!response.body) throw new ChoiceError("服务返回了空响应。", "protocol");
@@ -39,6 +40,16 @@ export function redact(text: string, secrets: string[]): string {
   return clean;
 }
 
+export function redactJson(value: JsonValue, secrets: string[]): JsonValue {
+  if (typeof value === "string") return redact(value, secrets);
+  if (Array.isArray(value)) return value.map((item) => redactJson(item, secrets));
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, redactJson(item, secrets)]),
+    );
+  return value;
+}
+
 export async function fetchJson(
   url: string,
   init: RequestInit,
@@ -54,7 +65,13 @@ export async function fetchJson(
       redirect: "error",
       signal: AbortSignal.any([signal, timeout]),
     });
-    const raw = await readJsonLimited(response);
+    let raw: unknown;
+    try {
+      raw = await readJsonLimited(response);
+    } catch (error) {
+      if (response.ok) throw error;
+      raw = undefined;
+    }
     if (!response.ok) {
       const { z } = await import("zod");
       const error = z

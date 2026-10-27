@@ -65,7 +65,9 @@ export class ChoiceGenerator {
   }
   async start(provider: ChoiceProvider) {
     this.cancelPending("cancelled");
+    const epoch = this.epoch;
     await this.loop;
+    if (epoch !== this.epoch) return;
     this.provider = provider;
     this.update({ runId: crypto.randomUUID(), runRounds: 0, status: "idle", reason: "" });
     return this.launch();
@@ -103,6 +105,7 @@ export class ChoiceGenerator {
     epoch: number,
   ) {
     const signal = controller.signal;
+    let activeRoundId: string | undefined;
     try {
       await provider.begin(params, signal);
       while (epoch === this.epoch && !signal.aborted) {
@@ -127,6 +130,7 @@ export class ChoiceGenerator {
         const number = this.task.runRounds + 1;
         const revision = this.task.revision;
         const id = `${this.task.runId}:${number}`;
+        activeRoundId = id;
         const request = provider.prepare({
           prompt: this.task.prompt,
           state: this.task.state,
@@ -154,6 +158,15 @@ export class ChoiceGenerator {
         let result: ChoiceResult | undefined;
         for (let attempt = 0; attempt <= params.retries; attempt++) {
           if (epoch !== this.epoch || signal.aborted) return;
+          if (this.isPausing()) {
+            this.updateRound(id, {
+              status: attemptErrors.length ? "error" : "cancelled",
+              durationMs: Date.now() - started,
+              finishedAt: new Date().toISOString(),
+            });
+            this.update({ status: "paused", reason: "已暂停，没有发起后续重试。" });
+            return;
+          }
           this.update({ requests: this.task.requests + 1 });
           this.updateRound(id, { attempts: attempt + 1, status: attempt ? "retrying" : "waiting" });
           try {
@@ -231,6 +244,18 @@ export class ChoiceGenerator {
       if (epoch !== this.epoch || signal.aborted) return;
       const message =
         error instanceof ChoiceError ? error.message : "生成器无法继续，请检查连接和配置。";
+      if (
+        activeRoundId &&
+        this.task.history.some(
+          (round) => round.id === activeRoundId && ["waiting", "retrying"].includes(round.status),
+        )
+      ) {
+        this.updateRound(activeRoundId, {
+          status: "error",
+          errors: [message],
+          finishedAt: new Date().toISOString(),
+        });
+      }
       this.update({ status: "error", reason: message });
     }
   }

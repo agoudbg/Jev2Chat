@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChoiceGenerator } from "@/lib/generator";
+import { ChoiceError } from "@/lib/provider";
 import { answer, deferred, mockSequence, provider, task } from "./helpers";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 describe("recursive Choice generation", () => {
   it("uses the complete printable ASCII vocabulary and appends actual model choices", async () => {
@@ -192,5 +196,73 @@ describe("recursive Choice generation", () => {
     await generator.start(provider());
     expect(generator.getSnapshot().state).toBe("");
     expect(generator.getSnapshot().status).toBe("completed");
+  });
+
+  it("keeps only the most recent start and can stop before the first request", async () => {
+    const network = mockSequence(["eos"]);
+    const generator = new ChoiceGenerator(task());
+    await Promise.all([generator.start(provider()), generator.start(provider())]);
+    expect(network.fetch).toHaveBeenCalledTimes(1);
+    const pending = generator.start(provider());
+    generator.stop();
+    await pending;
+    expect(network.fetch).toHaveBeenCalledTimes(1);
+    expect(generator.getSnapshot().status).toBe("stopped");
+  });
+
+  it("does not send a retry after pausing during backoff", async () => {
+    const network = vi.fn(async () => Response.json({ detail: "Busy" }, { status: 529 }));
+    vi.stubGlobal("fetch", network);
+    const value = task();
+    value.params.retries = 3;
+    const generator = new ChoiceGenerator(value);
+    const running = generator.start(provider());
+    await vi.waitFor(() => expect(generator.getSnapshot().history[0]?.errors).toHaveLength(1));
+    generator.pause();
+    await running;
+    expect(network).toHaveBeenCalledTimes(1);
+    expect(generator.getSnapshot().status).toBe("paused");
+    expect(generator.getSnapshot().history[0].status).toBe("error");
+  });
+
+  it("reports a timeout without appending or automatically retrying an uncertain result", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_, reject) => {
+            init.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+              once: true,
+            });
+          }),
+      ),
+    );
+    const value = task();
+    value.params.timeoutMs = 1_000;
+    value.params.retries = 2;
+    const generator = new ChoiceGenerator(value);
+    await generator.start(provider());
+    expect(generator.getSnapshot().requests).toBe(1);
+    expect(generator.getSnapshot().state).toBe("");
+    expect(generator.getSnapshot().reason).toContain("超时");
+  });
+
+  it("marks an adapter contract error on the affected round", async () => {
+    const adapter = provider();
+    vi.spyOn(adapter, "choose").mockResolvedValue({
+      key: "missing",
+      response: {},
+      confidence: 1,
+      probabilities: {},
+      model: "test",
+      usage: { input_tokens: 0, output_tokens: 0 },
+    });
+    const generator = new ChoiceGenerator(task());
+    await generator.start(adapter);
+    expect(generator.getSnapshot().history[0].status).toBe("error");
+    expect(generator.getSnapshot().state).toBe("");
+    expect(generator.getSnapshot().reason).toBe(
+      new ChoiceError("Provider returned an invalid option key.", "protocol").message,
+    );
   });
 });

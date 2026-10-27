@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { candidateSchema, characterCount, paramsSchema, settingsSchema } from "@/lib/domain";
-import { fetchJson, redact } from "@/lib/http";
+import { fetchJson, redactJson } from "@/lib/http";
 import { parseChoice, serializeChoice } from "@/lib/jev-protocol";
 import { credentialsSchema } from "@/lib/model-settings";
 import { ChoiceError } from "@/lib/provider";
@@ -42,6 +42,8 @@ interface Dependencies {
 function connection(payload: z.infer<typeof connectionSchema>, config: ServerConfig) {
   if (payload.settings.transport === "public") {
     if (!config.publicReady) throw new ApiError(503, "public_disabled", "公共服务没有启用。");
+    if (payload.settings.model !== config.JEV_PUBLIC_MODEL)
+      throw new ApiError(409, "public_config_changed", "公共模型配置已变化，请刷新页面后重试。");
     return {
       baseUrl: config.JEV_PUBLIC_BASE_URL,
       model: config.JEV_PUBLIC_MODEL,
@@ -115,12 +117,10 @@ export function handleChoice(request: Request, dependencies: Dependencies = {}) 
       );
       const result = parseChoice(raw, prepared);
       // Project known fields and redact credentials even if an upstream reflects them.
-      successful = JSON.parse(
-        redact(JSON.stringify(result.response), [
-          target.token,
-          ...Object.values(target.extraHeaders),
-        ]),
-      );
+      successful = redactJson(result.response, [
+        target.token,
+        ...Object.values(target.extraHeaders),
+      ]);
       return jsonResponse(successful);
     } finally {
       releaseByok?.();
@@ -166,12 +166,7 @@ export function handleConnection(request: Request, dependencies: Dependencies = 
         .safeParse(raw);
       if (!parsed.success) throw new ChoiceError("上游模型列表格式不正确。", "protocol");
       return jsonResponse(
-        JSON.parse(
-          redact(JSON.stringify(parsed.data), [
-            target.token,
-            ...Object.values(target.extraHeaders),
-          ]),
-        ),
+        redactJson(parsed.data, [target.token, ...Object.values(target.extraHeaders)]),
       );
     } finally {
       release();

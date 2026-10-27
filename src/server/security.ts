@@ -65,7 +65,7 @@ export async function readBody(request: Request, maxBytes: number): Promise<unkn
     reader.releaseLock();
   }
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)));
   } catch {
     throw new ApiError(400, "json", "请求体不是有效 JSON。");
   }
