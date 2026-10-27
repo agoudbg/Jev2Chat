@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const config: NextConfig = {
-  output: "standalone",
+  agentRules: false,
+  output: process.env.JEV_STANDALONE_BUILD === "true" ? "standalone" : undefined,
   poweredByHeader: false,
   async headers() {
     return [
