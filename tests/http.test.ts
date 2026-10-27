@@ -6,6 +6,20 @@ import { provider, task, answer } from "./helpers";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("bounded and sanitized HTTP", () => {
+  it("uses the HTTP status for retry policy even when a response includes an arbitrary code", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json(
+          { error: "Rate limit", code: "http_1000" },
+          { status: 429, headers: { "Retry-After": "2" } },
+        ),
+      ),
+    );
+    await expect(
+      fetchJson("https://api.typesafe.ai/v1/systemone", {}, 1_000, new AbortController().signal),
+    ).rejects.toMatchObject({ code: "http_429", retryable: true, retryAfterMs: 2_000 });
+  });
   it("preserves HTTP overload semantics when an upstream error page is not JSON", async () => {
     vi.stubGlobal(
       "fetch",

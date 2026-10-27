@@ -36,7 +36,22 @@ export function clientKey(request: Request, config: ServerConfig): string {
 }
 export function requireSameOrigin(request: Request) {
   const origin = request.headers.get("origin");
-  if (!origin || origin !== new URL(request.url).origin)
+  const target = new URL(request.url);
+  // NextURL normalizes loopback hosts and standalone servers use an internal hostname.
+  // Host preserves the browser's target authority; never use X-Forwarded-Host here.
+  const authority = request.headers.get("host")?.toLowerCase() ?? target.host;
+  let source: URL | undefined;
+  try {
+    source = origin ? new URL(origin) : undefined;
+  } catch {
+    throw new ApiError(403, "origin", "请求必须来自本站。");
+  }
+  if (
+    !source ||
+    origin !== source.origin ||
+    source.host !== authority ||
+    source.protocol !== target.protocol
+  )
     throw new ApiError(403, "origin", "请求必须来自本站。");
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
     throw new ApiError(415, "content_type", "请发送 application/json。");

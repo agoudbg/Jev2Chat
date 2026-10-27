@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PARAMS, DEFAULT_SETTINGS } from "@/lib/domain";
 import { serverConfig, clientConfig } from "@/server/config";
 import { handleChoice, handleConnection, handlePublicRun } from "@/server/handlers";
-import { ApiError, clientKey, readBody, validateTarget } from "@/server/security";
+import {
+  ApiError,
+  clientKey,
+  readBody,
+  requireSameOrigin,
+  validateTarget,
+} from "@/server/security";
 import { RateLimiter } from "@/server/rate-limiter";
 import { asciiVocabulary } from "@/lib/vocabulary";
 import { answer } from "./helpers";
@@ -118,6 +124,38 @@ describe("shared Redis public admission", () => {
 });
 
 describe("proxy security and HTTP boundary", () => {
+  it("accepts the original Host when NextURL normalizes loopback or uses a standalone hostname", () => {
+    expect(() =>
+      requireSameOrigin(
+        request(
+          "/api/choice",
+          {},
+          {
+            Host: "127.0.0.1:3017",
+            Origin: "https://127.0.0.1:3017",
+          },
+        ),
+      ),
+    ).not.toThrow();
+  });
+  it.each(["https://evil.example", "https://app.example:444", "https://app.example/path", "null"])(
+    "rejects a foreign, malformed or mismatched Origin: %s",
+    (origin) => {
+      expect(() =>
+        requireSameOrigin(
+          request(
+            "/api/choice",
+            {},
+            {
+              Host: "app.example",
+              Origin: origin,
+              "X-Forwarded-Host": "evil.example",
+            },
+          ),
+        ),
+      ).toThrow("本站");
+    },
+  );
   it("does not expose public or Redis Tokens in client config", () => {
     const json = JSON.stringify(clientConfig(config()));
     expect(json).not.toContain("server-only-token");

@@ -78,7 +78,6 @@ export async function fetchJson(
         .object({
           error: z.string().max(2_000).optional(),
           detail: z.string().max(2_000).optional(),
-          code: z.string().optional(),
           ambiguous: z.boolean().optional(),
         })
         .safeParse(raw);
@@ -90,7 +89,7 @@ export async function fetchJson(
       const retryAfter = Number(response.headers.get("retry-after") ?? "0");
       throw new ChoiceError(
         message,
-        error.success ? (error.data.code ?? `http_${response.status}`) : `http_${response.status}`,
+        `http_${response.status}`,
         [429, 503, 529].includes(response.status),
         error.success && error.data.ambiguous === true,
         Number.isFinite(retryAfter) ? Math.min(30_000, Math.max(0, retryAfter * 1_000)) : 0,
